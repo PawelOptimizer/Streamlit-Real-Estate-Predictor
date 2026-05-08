@@ -1,0 +1,1 @@
+"""Minimal app-only helpers."""
