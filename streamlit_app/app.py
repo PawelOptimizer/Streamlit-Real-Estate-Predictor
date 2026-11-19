@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.artifacts import load_json, load_model  # noqa: E402
+from src.llm_explain import DEFAULT_LLM_MODEL, explain_prediction, resolve_api_key  # noqa: E402
 from src.otodom_extract import extract_otodom_features  # noqa: E402
 from src.text_utils import strip_html_to_text  # noqa: E402
 
@@ -46,28 +47,65 @@ def _ensure_all_columns(row: dict, columns: list[str]) -> pd.DataFrame:
     return pd.DataFrame([full])
 
 
-def _prepare_row_for_prediction(row_df: pd.DataFrame) -> pd.DataFrame:
-    # Keep training/inference dtypes aligned for the demo model.
+def _prepare_row_for_prediction(row_df: pd.DataFrame, meta: dict) -> pd.DataFrame:
+    # Keep training/inference dtypes aligned (column groups come from the model metadata).
     prepared = row_df.copy()
-    numeric_cols = [
-        "district_lon",
-        "district_lat",
-        "no_rooms",
-        "m",
-        "map_lon",
-        "map_lat",
-        "param_build_year",
-        "param_building_floors_num",
-        "param_remote_services",
-        "param_rooms_num",
-        "_days",
-    ]
-    for c in numeric_cols:
-        if c in prepared.columns:
-            prepared[c] = pd.to_numeric(prepared[c], errors="coerce")
-    if "__text__" in prepared.columns:
-        prepared["__text__"] = prepared["__text__"].fillna("").astype(str)
+    numeric_cols = meta.get("numeric_columns", [])
+    string_cols = list(meta.get("multilabel_columns", [])) + ["__text__"]
+    for c in prepared.columns:
+        if c in numeric_cols:
+            prepared[c] = pd.to_numeric(prepared[c], errors="coerce").astype(float)
+        elif c in string_cols:
+            prepared[c] = prepared[c].fillna("").astype(str)
+        else:
+            prepared[c] = prepared[c].where(prepared[c].notna(), np.nan)
     return prepared
+
+
+def _predict(model, row_df: pd.DataFrame, meta: dict) -> float:
+    return float(model.predict(_prepare_row_for_prediction(row_df, meta))[0])
+
+
+def _what_if_effects(model, row_df: pd.DataFrame, meta: dict, coverage: pd.DataFrame) -> pd.DataFrame:
+    """Simple local sensitivity analysis: change one input at a time and measure the prediction change."""
+    base = _predict(model, row_df, meta)
+    row = row_df.iloc[0]
+    scenarios: list[tuple[str, dict]] = []
+    m_val = pd.to_numeric(row.get("m"), errors="coerce")
+    if pd.notna(m_val):
+        scenarios += [("area -10 m²", {"m": max(10.0, m_val - 10)}), ("area +10 m²", {"m": m_val + 10})]
+    rooms = pd.to_numeric(row.get("no_rooms"), errors="coerce")
+    if pd.notna(rooms):
+        if rooms > 1:
+            scenarios.append(("1 room fewer", {"no_rooms": rooms - 1}))
+        scenarios.append(("1 room more", {"no_rooms": rooms + 1}))
+    if row.get("market") in ("primary", "secondary"):
+        other = "secondary" if row.get("market") == "primary" else "primary"
+        scenarios.append((f"market = {other}", {"market": other}))
+    floor = pd.to_numeric(row.get("param_floor"), errors="coerce")
+    if "param_floor" in row_df.columns and pd.notna(floor):
+        scenarios.append(("ground floor", {"param_floor": 0.0}))
+    if "param_build_year" in row_df.columns and pd.notna(pd.to_numeric(row.get("param_build_year"), errors="coerce")):
+        scenarios.append(("build year unknown", {"param_build_year": np.nan}))
+    if not coverage.empty:
+        top = coverage.iloc[0]
+        scenarios.append(
+            (
+                f"location = most common district ({top['district_hint']})",
+                {"district_lat": top["lat_r"], "district_lon": top["lon_r"], "map_lat": top["lat_r"], "map_lon": top["lon_r"]},
+            )
+        )
+    if "__text__" in row_df.columns and str(row.get("__text__") or "").strip():
+        scenarios.append(("no ad text", {"__text__": ""}))
+
+    out = []
+    for name, changes in scenarios:
+        alt_row = row_df.copy()
+        for k, v in changes.items():
+            alt_row.at[0, k] = v
+        y = _predict(model, alt_row, meta)
+        out.append({"change": name, "price_per_m": round(y), "delta": round(y - base), "delta_pct": round((y - base) / base * 100, 1)})
+    return pd.DataFrame(out).sort_values("delta", key=np.abs, ascending=False, ignore_index=True)
 
 
 def _compute_days_since_train_min(created_at_raw: str | None, train_min_raw: str | None) -> float | None:
@@ -133,7 +171,21 @@ def _district_coverage_from_examples(examples: list[dict]) -> pd.DataFrame:
     return _aggregate_coverage(df)
 
 
-def _prediction_bounds(examples: list[dict]) -> tuple[float, float] | None:
+def _district_coverage_from_meta(meta: dict) -> pd.DataFrame:
+    grp = pd.DataFrame(meta.get("district_coverage") or [])
+    if grp.empty:
+        return grp
+    grp["district_hint"] = grp.apply(
+        lambda r: DISTRICT_LABELS.get((float(r["lat_r"]), float(r["lon_r"])), "Unknown cluster"),
+        axis=1,
+    )
+    return grp
+
+
+def _prediction_bounds(meta: dict, examples: list[dict]) -> tuple[float, float] | None:
+    # Prefer target quantiles of the full training window (saved by the training script).
+    if meta.get("target_q01") is not None and meta.get("target_q99") is not None:
+        return float(meta["target_q01"]), float(meta["target_q99"])
     ys = [float(e.get("y_true")) for e in examples if isinstance(e, dict) and e.get("y_true") is not None]
     if len(ys) < 3:
         return None
@@ -208,11 +260,16 @@ with left:
     )
 with right:
     st.write({"interval_residual_q05": interval.get("residual_q05"), "interval_residual_q95": interval.get("residual_q95")})
+    test_metrics = meta.get(f"metrics_{meta.get('model_kind')}")
+    if test_metrics:
+        st.write({"test_mape_%": round(test_metrics["mape_pct"], 2), "test_mae": round(test_metrics["mae"])})
 
 st.divider()
 
 st.subheader("District guide (from training coverage)")
-coverage = _district_coverage(int(months))
+coverage = _district_coverage_from_meta(meta)
+if coverage.empty:
+    coverage = _district_coverage(int(months))
 if coverage.empty:
     coverage = _district_coverage_from_examples(examples)
 if not coverage.empty:
@@ -227,7 +284,7 @@ if not coverage.empty:
                 "share_pct": "coverage_%",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.caption(
@@ -409,7 +466,7 @@ with main_left:
 
 with main_right:
     st.write("Raw row sent to model")
-    st.dataframe(row_df, use_container_width=True, hide_index=True)
+    st.dataframe(row_df, width="stretch", hide_index=True)
 
 st.divider()
 
@@ -422,18 +479,38 @@ with col_int:
     st.caption("Interval is approximate: computed from residual quantiles on the temporal test set.")
 
 if do_pred:
-    pred_row = _prepare_row_for_prediction(row_df)
-    raw_y_hat = float(model.predict(pred_row)[0])
+    raw_y_hat = _predict(model, row_df, meta)
     y_hat = raw_y_hat
-    bounds = _prediction_bounds(examples)
+    clip_warning = None
+    bounds = _prediction_bounds(meta, examples)
     if bounds is not None:
         b_lo, b_hi = bounds
         y_hat = float(np.clip(raw_y_hat, b_lo, b_hi))
         if not np.isclose(y_hat, raw_y_hat):
-            st.warning(
-                f"Raw prediction {raw_y_hat:,.0f} is outside typical example range "
+            clip_warning = (
+                f"Raw prediction {raw_y_hat:,.0f} is outside the typical training range "
                 f"[{b_lo:,.0f}, {b_hi:,.0f}]. Showing clipped value for stability."
             )
+    # Keep the result across reruns (e.g. when the "Explain" button is clicked).
+    st.session_state["last_prediction"] = {"row_json": row_df.to_json(), "y_hat": y_hat, "clip_warning": clip_warning}
+    st.session_state.pop("llm_explanation", None)
+
+pred_state = st.session_state.get("last_prediction")
+if pred_state and pred_state["row_json"] != row_df.to_json():
+    st.info("Inputs changed since the last prediction - click the predict button again.")
+    pred_state = None
+
+if pred_state:
+    y_hat = pred_state["y_hat"]
+    if pred_state["clip_warning"]:
+        st.warning(pred_state["clip_warning"])
+    days_max = meta.get("days_max")
+    row_days = pd.to_numeric(row_df.at[0, "_days"], errors="coerce") if "_days" in row_df.columns else np.nan
+    if days_max is not None and pd.notna(row_days) and row_days > days_max:
+        st.info(
+            f"This ad is newer than the training data (which ends {str(meta.get('date_max', ''))[:10]}). "
+            "The prediction reflects market prices from that period, not today's."
+        )
     q05 = float(interval["residual_q05"])
     q95 = float(interval["residual_q95"])
     lo = y_hat + q05
@@ -492,8 +569,41 @@ if do_pred:
         )
     )
     chart = (interval_rule + bounds_points + pred_point).properties(height=90)
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
     st.caption("Zoomed x-axis around interval. Blue segment = [q05, q95], red point = prediction.")
+
+    st.subheader("Explain prediction (XAI)")
+    st.caption(
+        "What-if analysis: one input is changed at a time while all others stay fixed. "
+        "An LLM then turns these numbers into a short explanation."
+    )
+    effects = _what_if_effects(model, row_df, meta, coverage)
+    st.dataframe(effects, width="stretch", hide_index=True)
+
+    api_key = resolve_api_key()
+    if not api_key:
+        api_key = st.text_input(
+            "OpenAI API key",
+            type="password",
+            help="Or set OPENAI_API_KEY in .env, environment variables or Streamlit secrets.",
+        )
+    llm_model = st.text_input("LLM model", value=DEFAULT_LLM_MODEL)
+    if st.button("Explain with LLM", disabled=not api_key):
+        with st.spinner("Calling LLM..."):
+            try:
+                st.session_state["llm_explanation"] = explain_prediction(
+                    api_key=api_key,
+                    model=llm_model.strip() or DEFAULT_LLM_MODEL,
+                    row=row_df.iloc[0].to_dict(),
+                    prediction={"price_per_m": round(y_hat), "lower_q05": round(lo), "upper_q95": round(hi)},
+                    effects=effects.to_dict(orient="records"),
+                    meta=meta,
+                )
+            except Exception as e:
+                st.error("LLM call failed.")
+                st.exception(e)
+    if st.session_state.get("llm_explanation"):
+        st.markdown(st.session_state["llm_explanation"])
 
 st.divider()
 
@@ -533,14 +643,14 @@ if input_mode == "Example mode" and examples:
         s3.metric("Selected upper (q95)", f"{selected_row['upper_q95']:,.0f}")
         st.dataframe(
             pd.DataFrame([selected_row]).drop(columns=["example_id"]),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     else:
-        st.dataframe(ex_df, use_container_width=True, hide_index=True)
+        st.dataframe(ex_df, width="stretch", hide_index=True)
 
     with st.expander("Show all example predictions"):
-        st.dataframe(ex_df, use_container_width=True, hide_index=True)
+        st.dataframe(ex_df, width="stretch", hide_index=True)
 elif input_mode == "Example mode":
     st.info("No examples file found or it was empty.")
 

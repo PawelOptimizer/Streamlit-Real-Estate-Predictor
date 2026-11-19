@@ -2,53 +2,209 @@
   "label": "recent_6m",
   "slice": "last_6m",
   "model_kind": "combined",
+  "model_type": "HistGradientBoostingRegressor + TF-IDF/SVD text",
+  "sklearn_version": "1.9.1",
   "raw_columns": [
-    "market",
-    "district_lon",
-    "district_lat",
-    "no_rooms",
     "m",
-    "map_lon",
+    "no_rooms",
+    "district_lat",
+    "district_lon",
     "map_lat",
+    "map_lon",
     "param_build_year",
     "param_building_floors_num",
+    "param_floor",
+    "param_rent",
+    "_days",
+    "market",
+    "param_building_type",
     "param_building_material",
     "param_building_ownership",
-    "param_building_type",
     "param_construction_status",
-    "param_equipment_types",
-    "param_extras_types",
-    "param_floor_no",
-    "param_free_from",
     "param_heating",
-    "param_m",
-    "param_market",
-    "param_media_types",
-    "param_remote_services",
-    "param_rent",
-    "param_rent_currency",
-    "param_rooms_num",
-    "param_security_types",
     "param_windows_type",
-    "_days",
+    "param_extras_types",
+    "param_media_types",
+    "param_security_types",
+    "param_equipment_types",
     "__text__"
   ],
-  "n_rows": 3687,
-  "n_train": 2950,
-  "n_test": 737,
-  "split_ts": "2020-12-31 13:39:59",
+  "numeric_columns": [
+    "m",
+    "no_rooms",
+    "district_lat",
+    "district_lon",
+    "map_lat",
+    "map_lon",
+    "param_build_year",
+    "param_building_floors_num",
+    "param_floor",
+    "param_rent",
+    "_days"
+  ],
+  "categorical_columns": [
+    "market",
+    "param_building_type",
+    "param_building_material",
+    "param_building_ownership",
+    "param_construction_status",
+    "param_heating",
+    "param_windows_type"
+  ],
+  "multilabel_columns": [
+    "param_extras_types",
+    "param_media_types",
+    "param_security_types",
+    "param_equipment_types"
+  ],
+  "text_column": "__text__",
+  "n_rows": 3686,
+  "n_train": 2948,
+  "n_test": 738,
+  "split_ts": "2020-12-31 13:35:14",
   "date_min": "2020-07-31 22:19:36",
   "date_max": "2021-01-31 21:21:22",
   "window_cut": "2020-07-31 21:21:22",
   "window_max": "2021-01-31 21:21:22",
-  "metrics_tabular": {
-    "rmse": 487.57543801053924,
-    "mae": 336.4921246109659,
-    "mape_pct": 4.233552486248571
-  },
+  "days_max": 183.95956018518518,
+  "target_q01": 5537.04,
+  "target_q99": 10785.11,
   "metrics_combined": {
-    "rmse": 479.59028377758654,
-    "mae": 323.4093740999307,
-    "mape_pct": 4.06192597440236
-  }
+    "rmse": 479.1771595214192,
+    "mae": 329.78475347013443,
+    "mape_pct": 4.1455818255311865
+  },
+  "metrics_baseline_district_median": {
+    "rmse": 966.5989141055704,
+    "mae": 631.6631707317074,
+    "mape_pct": 8.000715557663778
+  },
+  "district_coverage": [
+    {
+      "lat_r": 52.384,
+      "lon_r": 16.941,
+      "count": 1802,
+      "median_price_per_m": 7833.0,
+      "share_pct": 49.49
+    },
+    {
+      "lat_r": 52.378,
+      "lon_r": 16.987,
+      "count": 802,
+      "median_price_per_m": 8250.0,
+      "share_pct": 22.03
+    },
+    {
+      "lat_r": 52.399,
+      "lon_r": 16.964,
+      "count": 742,
+      "median_price_per_m": 7717.0,
+      "share_pct": 20.38
+    },
+    {
+      "lat_r": 52.38,
+      "lon_r": 16.944,
+      "count": 140,
+      "median_price_per_m": 7636.0,
+      "share_pct": 3.85
+    },
+    {
+      "lat_r": 52.388,
+      "lon_r": 16.976,
+      "count": 69,
+      "median_price_per_m": 7317.0,
+      "share_pct": 1.9
+    },
+    {
+      "lat_r": 52.38,
+      "lon_r": 16.965,
+      "count": 27,
+      "median_price_per_m": 6965.0,
+      "share_pct": 0.74
+    },
+    {
+      "lat_r": 52.412,
+      "lon_r": 16.922,
+      "count": 22,
+      "median_price_per_m": 7787.0,
+      "share_pct": 0.6
+    },
+    {
+      "lat_r": 52.408,
+      "lon_r": 16.931,
+      "count": 20,
+      "median_price_per_m": 9690.0,
+      "share_pct": 0.55
+    },
+    {
+      "lat_r": 52.427,
+      "lon_r": 16.936,
+      "count": 4,
+      "median_price_per_m": 7616.0,
+      "share_pct": 0.11
+    },
+    {
+      "lat_r": 52.378,
+      "lon_r": 16.917,
+      "count": 2,
+      "median_price_per_m": 13061.0,
+      "share_pct": 0.05
+    },
+    {
+      "lat_r": 52.4,
+      "lon_r": 16.948,
+      "count": 2,
+      "median_price_per_m": 9585.0,
+      "share_pct": 0.05
+    },
+    {
+      "lat_r": 52.396,
+      "lon_r": 16.872,
+      "count": 2,
+      "median_price_per_m": 6743.0,
+      "share_pct": 0.05
+    },
+    {
+      "lat_r": 52.451,
+      "lon_r": 16.948,
+      "count": 2,
+      "median_price_per_m": 6519.0,
+      "share_pct": 0.05
+    },
+    {
+      "lat_r": 52.409,
+      "lon_r": 16.934,
+      "count": 1,
+      "median_price_per_m": 8481.0,
+      "share_pct": 0.03
+    },
+    {
+      "lat_r": 52.41,
+      "lon_r": 16.941,
+      "count": 1,
+      "median_price_per_m": 13421.0,
+      "share_pct": 0.03
+    },
+    {
+      "lat_r": 52.411,
+      "lon_r": 16.953,
+      "count": 1,
+      "median_price_per_m": 7626.0,
+      "share_pct": 0.03
+    },
+    {
+      "lat_r": 52.412,
+      "lon_r": 17.046,
+      "count": 1,
+      "median_price_per_m": 9318.0,
+      "share_pct": 0.03
+    },
+    {
+      "lat_r": 52.394,
+      "lon_r": 16.894,
+      "count": 1,
+      "median_price_per_m": 8300.0,
+      "share_pct": 0.03
+    }
+  ]
 }

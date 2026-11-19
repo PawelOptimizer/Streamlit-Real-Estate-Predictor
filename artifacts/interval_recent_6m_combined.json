@@ -1,6 +1,6 @@
 {
-  "residual_q05": -604.2818730134071,
-  "residual_q95": 716.0219136791129,
-  "n_calib": 737,
+  "residual_q05": -684.4103731888234,
+  "residual_q95": 849.6688194715688,
+  "n_calib": 738,
   "note": "Interval computed as pred + quantile(residual) on temporal test set (approximate)."
 }
